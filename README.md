@@ -14,12 +14,59 @@
 - ✅ 自动跳转到未标注图片
 - 💾 MySQL数据持久化存储
 
+## 快速开始
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/Affliction-TK/Weather-Agency-Label-Tool.git
+cd Weather-Agency-Label-Tool
+
+# 2. 运行自动化设置
+./setup.sh
+
+# 3. 启动 MySQL（使用 Docker）
+docker-compose up -d
+
+# 4. 构建并运行
+make build
+./server
+```
+
+打开浏览器访问 http://localhost:8080
+
+📖 **详细说明**: 查看 [快速开始指南](QUICKSTART.md)
+
+## 文档
+
+- **[快速开始指南](QUICKSTART.md)** - 5分钟快速入门
+- **[API 文档](API.md)** - 完整的 REST API 参考
+- **[部署指南](DEPLOYMENT.md)** - 生产环境部署说明
+- **[系统架构](ARCHITECTURE.md)** - 架构设计和技术决策
+- **[贡献指南](CONTRIBUTING.md)** - 如何参与项目开发
+
 ## 技术栈
 
 - **后端**: Go 1.24 + Gorilla Mux
 - **前端**: Svelte + Vite
 - **数据库**: MySQL 8.0+
 - **文件存储**: 本地文件系统
+
+## 系统截图
+
+### 主界面
+- 左侧：图片列表（缩略图、文件名、标注状态）
+- 右侧：标注表单或上传界面
+
+### 标注功能
+- 气象类型选择
+- 严重等级选择
+- 时间、地点、经纬度输入
+- 自动推荐最近的监测站点
+
+### 上传功能
+- 拖拽上传或点击选择
+- 支持多文件同时上传
+- 上传进度显示
 
 ## 快速开始
 
