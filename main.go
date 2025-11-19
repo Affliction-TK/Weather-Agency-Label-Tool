@@ -11,13 +11,68 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 )
 
 var db *sql.DB
+
+func init() {
+	_ = godotenv.Load()
+}
+
+func getEnv(key, fallback string) string {
+	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+		return val
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			return n
+		}
+		log.Printf("Invalid value for %s, using default %d", key, fallback)
+	}
+	return fallback
+}
+
+func buildDSN() string {
+	if raw := strings.TrimSpace(os.Getenv("DB_DSN")); raw != "" {
+		return raw
+	}
+
+	host := getEnv("DB_HOST", "127.0.0.1")
+	port := getEnv("DB_PORT", "3306")
+	name := getEnv("DB_NAME", "weather_label_db")
+	user := getEnv("DB_USER", "root")
+	password := os.Getenv("DB_PASSWORD")
+	params := getEnv("DB_PARAMS", "parseTime=true&charset=utf8mb4&loc=Local")
+
+	credentials := user
+	if password != "" {
+		credentials = fmt.Sprintf("%s:%s", user, password)
+	}
+
+	dsn := fmt.Sprintf("%s@tcp(%s:%s)/%s", credentials, host, port, name)
+	if params != "" {
+		dsn = fmt.Sprintf("%s?%s", dsn, params)
+	}
+	return dsn
+}
+
+func getUploadDir() string {
+	return getEnv("UPLOAD_DIR", "./uploads")
+}
+
+func getStaticDir() string {
+	return getEnv("STATIC_DIR", "./frontend/dist")
+}
 
 // Models
 type Station struct {
@@ -57,24 +112,20 @@ type ImageWithAnnotation struct {
 // Initialize database connection
 func initDB() error {
 	var err error
-	// Connection string format: username:password@tcp(host:port)/dbname
-	dsn := os.Getenv("DB_DSN")
-	if dsn == "" {
-		dsn = "root:password@tcp(localhost:3306)/weather_label_db?parseTime=true"
-	}
-	
+	dsn := buildDSN()
+
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		return err
 	}
-	
+
 	if err = db.Ping(); err != nil {
 		return err
 	}
-	
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	
+
+	db.SetMaxOpenConns(getEnvInt("DB_MAX_OPEN_CONNS", 10))
+	db.SetMaxIdleConns(getEnvInt("DB_MAX_IDLE_CONNS", 5))
+
 	log.Println("Database connected successfully")
 	return nil
 }
@@ -82,17 +133,17 @@ func initDB() error {
 // Calculate distance between two points using Haversine formula
 func haversineDistance(lon1, lat1, lon2, lat2 float64) float64 {
 	const earthRadius = 6371 // km
-	
+
 	dLat := (lat2 - lat1) * math.Pi / 180.0
 	dLon := (lon2 - lon1) * math.Pi / 180.0
-	
+
 	lat1Rad := lat1 * math.Pi / 180.0
 	lat2Rad := lat2 * math.Pi / 180.0
-	
+
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
 		math.Sin(dLon/2)*math.Sin(dLon/2)*math.Cos(lat1Rad)*math.Cos(lat2Rad)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-	
+
 	return earthRadius * c
 }
 
@@ -103,23 +154,23 @@ func findNearestStation(lon, lat float64) (*Station, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var nearestStation *Station
 	minDistance := math.MaxFloat64
-	
+
 	for rows.Next() {
 		var station Station
 		if err := rows.Scan(&station.ID, &station.Name, &station.Longitude, &station.Latitude); err != nil {
 			continue
 		}
-		
+
 		distance := haversineDistance(lon, lat, station.Longitude, station.Latitude)
 		if distance < minDistance {
 			minDistance = distance
 			nearestStation = &station
 		}
 	}
-	
+
 	return nearestStation, nil
 }
 
@@ -129,12 +180,12 @@ func enableCORS(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -146,7 +197,7 @@ func getStations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	
+
 	stations := []Station{}
 	for rows.Next() {
 		var station Station
@@ -155,7 +206,7 @@ func getStations(w http.ResponseWriter, r *http.Request) {
 		}
 		stations = append(stations, station)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stations)
 }
@@ -163,25 +214,25 @@ func getStations(w http.ResponseWriter, r *http.Request) {
 func getNearestStation(w http.ResponseWriter, r *http.Request) {
 	lonStr := r.URL.Query().Get("longitude")
 	latStr := r.URL.Query().Get("latitude")
-	
+
 	lon, err := strconv.ParseFloat(lonStr, 64)
 	if err != nil {
 		http.Error(w, "Invalid longitude", http.StatusBadRequest)
 		return
 	}
-	
+
 	lat, err := strconv.ParseFloat(latStr, 64)
 	if err != nil {
 		http.Error(w, "Invalid latitude", http.StatusBadRequest)
 		return
 	}
-	
+
 	station, err := findNearestStation(lon, lat)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(station)
 }
@@ -197,7 +248,7 @@ func getImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	
+
 	images := []Image{}
 	for rows.Next() {
 		var img Image
@@ -206,7 +257,7 @@ func getImages(w http.ResponseWriter, r *http.Request) {
 		}
 		images = append(images, img)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(images)
 }
@@ -214,19 +265,19 @@ func getImages(w http.ResponseWriter, r *http.Request) {
 func getImage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
-	
+
 	var img Image
 	err := db.QueryRow(`
 		SELECT id, filename, filepath, uploaded_at, annotated
 		FROM images
 		WHERE id = ?
 	`, id).Scan(&img.ID, &img.Filename, &img.Filepath, &img.UploadedAt, &img.Annotated)
-	
+
 	if err != nil {
 		http.Error(w, "Image not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Get annotation if exists
 	var annotation Annotation
 	err = db.QueryRow(`
@@ -239,15 +290,15 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		&annotation.ObservationTime, &annotation.Location, &annotation.Longitude,
 		&annotation.Latitude, &annotation.StationID, &annotation.CreatedAt, &annotation.UpdatedAt,
 	)
-	
+
 	response := ImageWithAnnotation{
 		Image: img,
 	}
-	
+
 	if err == nil {
 		response.Annotation = &annotation
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -258,11 +309,11 @@ func createAnnotation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Check if annotation already exists for this image
 	var existingID int
 	err := db.QueryRow("SELECT id FROM annotations WHERE image_id = ?", annotation.ImageID).Scan(&existingID)
-	
+
 	if err == sql.ErrNoRows {
 		// Create new annotation
 		result, err := db.Exec(`
@@ -271,12 +322,12 @@ func createAnnotation(w http.ResponseWriter, r *http.Request) {
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, annotation.ImageID, annotation.Category, annotation.Severity, annotation.ObservationTime,
 			annotation.Location, annotation.Longitude, annotation.Latitude, annotation.StationID)
-		
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		id, _ := result.LastInsertId()
 		annotation.ID = int(id)
 	} else {
@@ -287,22 +338,22 @@ func createAnnotation(w http.ResponseWriter, r *http.Request) {
 			    longitude = ?, latitude = ?, station_id = ?
 			WHERE image_id = ?
 		`, annotation.Category, annotation.Severity, annotation.ObservationTime,
-			annotation.Location, annotation.Longitude, annotation.Latitude, 
+			annotation.Location, annotation.Longitude, annotation.Latitude,
 			annotation.StationID, annotation.ImageID)
-		
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		annotation.ID = existingID
 	}
-	
+
 	// Mark image as annotated
 	_, err = db.Exec("UPDATE images SET annotated = TRUE WHERE id = ?", annotation.ImageID)
 	if err != nil {
 		log.Printf("Error updating image annotated status: %v", err)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(annotation)
@@ -314,25 +365,25 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	file, header, err := r.FormFile("image")
 	if err != nil {
 		http.Error(w, "No image file provided", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
-	
+
 	// Create uploads directory if it doesn't exist
-	uploadsDir := "./uploads"
+	uploadsDir := getUploadDir()
 	if err := os.MkdirAll(uploadsDir, os.ModePerm); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Generate unique filename
 	filename := fmt.Sprintf("%d_%s", time.Now().Unix(), header.Filename)
 	filepath := filepath.Join(uploadsDir, filename)
-	
+
 	// Create destination file
 	dst, err := os.Create(filepath)
 	if err != nil {
@@ -340,22 +391,22 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer dst.Close()
-	
+
 	// Copy uploaded file to destination
 	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Save to database
 	result, err := db.Exec("INSERT INTO images (filename, filepath) VALUES (?, ?)", filename, filepath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	id, _ := result.LastInsertId()
-	
+
 	img := Image{
 		ID:         int(id),
 		Filename:   filename,
@@ -363,7 +414,7 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 		UploadedAt: time.Now(),
 		Annotated:  false,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(img)
@@ -372,15 +423,15 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 func serveImage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	filename := vars["filename"]
-	
-	filepath := filepath.Join("./uploads", filename)
-	
+
+	filepath := filepath.Join(getUploadDir(), filename)
+
 	// Check if file exists
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		http.Error(w, "Image not found", http.StatusNotFound)
 		return
 	}
-	
+
 	http.ServeFile(w, r, filepath)
 }
 
@@ -390,10 +441,10 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 	defer db.Close()
-	
+
 	// Create router
 	r := mux.NewRouter()
-	
+
 	// API routes
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/stations", getStations).Methods("GET")
@@ -402,22 +453,22 @@ func main() {
 	api.HandleFunc("/images/{id}", getImage).Methods("GET")
 	api.HandleFunc("/annotations", createAnnotation).Methods("POST")
 	api.HandleFunc("/upload", uploadImage).Methods("POST")
-	
+
 	// Image serving route
 	r.HandleFunc("/images/{filename}", serveImage).Methods("GET")
-	
+
 	// Serve static files from frontend
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist")))
-	
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir(getStaticDir())))
+
 	// Enable CORS
 	handler := enableCORS(r)
-	
+
 	// Start server
-	port := os.Getenv("PORT")
+	port := getEnv("PORT", "8080")
 	if port == "" {
 		port = "8080"
 	}
-	
+
 	log.Printf("Server starting on port %s...\n", port)
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

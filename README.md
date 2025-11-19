@@ -94,13 +94,27 @@ CREATE DATABASE weather_label_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_c
 
 ### 2. 配置环境变量
 
-设置数据库连接字符串：
+复制示例配置并按需调整：
 
 ```bash
-export DB_DSN="root:password@tcp(localhost:3306)/weather_label_db?parseTime=true"
+cp .env.example .env
 ```
 
-修改 `root:password` 为你的 MySQL 用户名和密码。
+编辑 `.env`，填写数据库和服务参数：
+
+```
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=weather_label_db
+DB_USER=weather_user
+DB_PASSWORD=your_password
+DB_PARAMS=parseTime=true&charset=utf8mb4&loc=Local
+PORT=8080
+UPLOAD_DIR=./uploads
+STATIC_DIR=./frontend/dist
+```
+
+如需一次性指定完整 DSN，可设置 `DB_DSN` 覆盖上述字段。
 
 ### 3. 安装依赖
 

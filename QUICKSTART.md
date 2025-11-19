@@ -67,18 +67,13 @@ mysql -u weather_user -p weather_label_db < schema.sql
 
 ### 4. Configure Application
 
+复制示例配置：
+
 ```bash
-# Copy environment file
 cp .env.example .env
-
-# Edit .env with your database credentials
-nano .env
 ```
 
-Update the DB_DSN line:
-```
-DB_DSN=weather_user:your_password@tcp(localhost:3306)/weather_label_db?parseTime=true
-```
+编辑 `.env`，按需更新 `DB_HOST/PORT/NAME/USER/PASSWORD` 等字段（也可通过 `DB_DSN` 自定义完整连接串）。
 
 ### 5. Install Dependencies
 

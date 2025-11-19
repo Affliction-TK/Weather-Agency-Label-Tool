@@ -84,8 +84,15 @@ sudo nano .env
 
 Add:
 ```
-DB_DSN=weather_user:your_secure_password@tcp(localhost:3306)/weather_label_db?parseTime=true
 PORT=8080
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=weather_label_db
+DB_USER=weather_user
+DB_PASSWORD=your_secure_password
+DB_PARAMS=parseTime=true&charset=utf8mb4&loc=Local
+UPLOAD_DIR=/opt/Weather-Agency-Label-Tool/uploads
+STATIC_DIR=/opt/Weather-Agency-Label-Tool/frontend/dist
 ```
 
 ### 7. Create Systemd Service
@@ -108,7 +115,15 @@ WorkingDirectory=/opt/Weather-Agency-Label-Tool
 ExecStart=/opt/Weather-Agency-Label-Tool/server
 Restart=on-failure
 RestartSec=5s
-Environment="DB_DSN=weather_user:your_secure_password@tcp(localhost:3306)/weather_label_db?parseTime=true"
+Environment="PORT=8080"
+Environment="DB_HOST=localhost"
+Environment="DB_PORT=3306"
+Environment="DB_NAME=weather_label_db"
+Environment="DB_USER=weather_user"
+Environment="DB_PASSWORD=your_secure_password"
+Environment="DB_PARAMS=parseTime=true&charset=utf8mb4&loc=Local"
+Environment="UPLOAD_DIR=/opt/Weather-Agency-Label-Tool/uploads"
+Environment="STATIC_DIR=/opt/Weather-Agency-Label-Tool/frontend/dist"
 
 [Install]
 WantedBy=multi-user.target
