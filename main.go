@@ -76,7 +76,7 @@ func getStaticDir() string {
 
 // Models
 type Station struct {
-	ID        int     `json:"id"`
+	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	Longitude float64 `json:"longitude"`
 	Latitude  float64 `json:"latitude"`
@@ -99,7 +99,7 @@ type Annotation struct {
 	Location        string    `json:"location"`
 	Longitude       float64   `json:"longitude"`
 	Latitude        float64   `json:"latitude"`
-	StationID       int       `json:"station_id"`
+	StationID       string    `json:"station_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }

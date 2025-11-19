@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { toasts } from './toastStore.js';
   
   export let image;
   export let annotation = null;
@@ -10,17 +11,49 @@
   const IMAGE_BASE = window.location.hostname === 'localhost' ? 'http://localhost:8080/images' : '/images';
 
   let formData = {
-    category: annotation?.category || '大雾',
-    severity: annotation?.severity || '轻度',
-    observationTime: annotation?.observation_time ? new Date(annotation.observation_time).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-    location: annotation?.location || '',
-    longitude: annotation?.longitude || '',
-    latitude: annotation?.latitude || '',
-    stationId: annotation?.station_id || ''
+    category: '大雾',
+    severity: '轻度',
+    observationTime: new Date().toISOString().slice(0, 16),
+    location: '',
+    longitude: '',
+    latitude: '',
+    stationId: ''
   };
 
   let saving = false;
   let suggestedStation = null;
+
+  // Reset form when image changes
+  $: if (image) {
+    resetForm();
+  }
+
+  function resetForm() {
+    if (annotation) {
+      // Load existing annotation
+      formData = {
+        category: annotation.category || '大雾',
+        severity: annotation.severity || '轻度',
+        observationTime: annotation.observation_time ? new Date(annotation.observation_time).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+        location: annotation.location || '',
+        longitude: annotation.longitude || '',
+        latitude: annotation.latitude || '',
+        stationId: annotation.station_id || ''
+      };
+    } else {
+      // Reset to defaults for new annotation
+      formData = {
+        category: '大雾',
+        severity: '轻度',
+        observationTime: new Date().toISOString().slice(0, 16),
+        location: '',
+        longitude: '',
+        latitude: '',
+        stationId: ''
+      };
+    }
+    suggestedStation = null;
+  }
 
   // Watch for coordinate changes to suggest nearest station
   $: if (formData.longitude && formData.latitude) {
@@ -57,7 +90,7 @@
         location: formData.location,
         longitude: parseFloat(formData.longitude),
         latitude: parseFloat(formData.latitude),
-        station_id: parseInt(formData.stationId)
+        station_id: formData.stationId
       };
 
       const response = await fetch(`${API_BASE}/annotations`, {
@@ -69,14 +102,15 @@
       });
 
       if (response.ok) {
+        toasts.success('标注保存成功！');
         dispatch('saved');
-        alert('标注保存成功！');
       } else {
-        alert('保存失败，请重试');
+        const errorText = await response.text();
+        toasts.error('保存失败：' + (errorText || '请重试'));
       }
     } catch (error) {
       console.error('Failed to save annotation:', error);
-      alert('保存失败：' + error.message);
+      toasts.error('保存失败：' + error.message);
     } finally {
       saving = false;
     }
@@ -193,102 +227,116 @@
   .annotation-form {
     height: 100%;
     overflow-y: auto;
-    padding: 20px;
+    padding: 24px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   }
 
   .image-preview {
-    margin-bottom: 20px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    margin-bottom: 24px;
+    border-radius: 16px;
     overflow: hidden;
-    background: #f9f9f9;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    background: white;
   }
 
   .image-preview img {
     width: 100%;
-    max-height: 400px;
+    max-height: 450px;
     object-fit: contain;
     background: white;
   }
 
   .image-info {
-    padding: 10px;
+    padding: 16px;
     font-size: 14px;
     color: #666;
+    font-weight: 500;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
   }
 
   form {
     background: white;
-    padding: 20px;
-    border-radius: 8px;
-    border: 1px solid #ddd;
+    padding: 28px;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
 
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 15px;
+    gap: 20px;
   }
 
   .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
   }
 
   label {
     display: block;
-    margin-bottom: 8px;
-    font-weight: 500;
+    margin-bottom: 10px;
+    font-weight: 600;
     color: #333;
     font-size: 14px;
   }
 
   input, select {
     width: 100%;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    padding: 12px 16px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
     font-size: 14px;
     box-sizing: border-box;
+    transition: all 0.3s;
+    background: white;
   }
 
   input:focus, select:focus {
     outline: none;
-    border-color: #1976d2;
-    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+    border-color: #667eea;
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
   }
 
   .suggestion {
-    margin-top: 8px;
-    padding: 8px;
-    background: #e3f2fd;
-    border-radius: 4px;
-    font-size: 12px;
-    color: #1976d2;
+    margin-top: 12px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-radius: 10px;
+    font-size: 13px;
+    color: #667eea;
+    font-weight: 500;
+    border-left: 4px solid #667eea;
   }
 
   .form-actions {
-    margin-top: 30px;
+    margin-top: 32px;
     text-align: right;
   }
 
   button {
-    padding: 12px 30px;
-    background: #1976d2;
+    padding: 14px 36px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    border-radius: 4px;
+    border-radius: 12px;
     font-size: 16px;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
   }
 
   button:hover:not(:disabled) {
-    background: #1565c0;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  }
+
+  button:active:not(:disabled) {
+    transform: translateY(0);
   }
 
   button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+    transform: none;
   }
 </style>

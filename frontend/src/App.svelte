@@ -3,6 +3,8 @@
   import ImageList from './lib/ImageList.svelte';
   import AnnotationForm from './lib/AnnotationForm.svelte';
   import UploadTab from './lib/UploadTab.svelte';
+  import Toast from './lib/Toast.svelte';
+  import { toasts } from './lib/toastStore.js';
 
   let images = [];
   let stations = [];
@@ -25,6 +27,7 @@
       stations = await response.json();
     } catch (error) {
       console.error('Failed to load stations:', error);
+      toasts.error('加载监测站点失败');
     }
   }
 
@@ -45,6 +48,7 @@
       }
     } catch (error) {
       console.error('Failed to load images:', error);
+      toasts.error('加载图片列表失败');
     }
   }
 
@@ -57,6 +61,7 @@
       activeTab = 'annotate';
     } catch (error) {
       console.error('Failed to load image details:', error);
+      toasts.error('加载图片详情失败');
     }
   }
 
@@ -80,6 +85,16 @@
 
   $: allAnnotated = images.length > 0 && images.every(img => img.annotated);
 </script>
+
+<!-- Toast Notifications -->
+{#each $toasts as toast (toast.id)}
+  <Toast 
+    message={toast.message} 
+    type={toast.type} 
+    duration={toast.duration}
+    onClose={() => toasts.remove(toast.id)}
+  />
+{/each}
 
 <main>
   <div class="container">
@@ -139,7 +154,8 @@
 <style>
   :global(body) {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   }
 
   main {
@@ -151,20 +167,29 @@
   .container {
     display: flex;
     height: 100%;
+    margin: 0;
   }
 
   .sidebar {
-    width: 300px;
-    background: #f5f5f5;
-    border-right: 1px solid #ddd;
+    width: 320px;
+    background: #f8f9fa;
+    border-right: 1px solid #e0e0e0;
     overflow-y: auto;
     padding: 20px;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.05);
   }
 
   .sidebar h2 {
     margin-top: 0;
-    font-size: 18px;
+    margin-bottom: 20px;
+    font-size: 20px;
+    font-weight: 700;
     color: #333;
+    text-align: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .content {
@@ -172,36 +197,42 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: white;
   }
 
   .tabs {
     display: flex;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 2px solid #e0e0e0;
     background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   }
 
   .tabs button {
-    padding: 15px 30px;
+    padding: 16px 32px;
     border: none;
     background: none;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 15px;
+    font-weight: 600;
     color: #666;
     border-bottom: 3px solid transparent;
-    transition: all 0.2s;
+    transition: all 0.3s;
+    position: relative;
   }
 
   .tabs button:hover {
-    background: #f5f5f5;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+    color: #667eea;
   }
 
   .tabs button.active {
-    color: #1976d2;
-    border-bottom-color: #1976d2;
+    color: #667eea;
+    border-bottom-color: #667eea;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
   }
 
   .tabs button:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
@@ -212,17 +243,23 @@
     justify-content: center;
     height: 100%;
     text-align: center;
-    color: #4caf50;
+    padding: 40px;
   }
 
   .all-done h2 {
-    font-size: 32px;
-    margin-bottom: 10px;
+    font-size: 36px;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 700;
   }
 
   .all-done p {
     color: #666;
     font-size: 16px;
+    line-height: 1.6;
   }
 
   .no-image {
@@ -231,5 +268,6 @@
     justify-content: center;
     height: 100%;
     color: #999;
+    font-size: 16px;
   }
 </style>
