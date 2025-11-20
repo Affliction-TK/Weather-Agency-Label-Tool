@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -576,6 +577,129 @@ func serveImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath)
 }
 
+// Baidu Geocoding API structures
+type BaiduGeocodingResponse struct {
+	Status int `json:"status"`
+	Result struct {
+		Location struct {
+			Lng float64 `json:"lng"`
+			Lat float64 `json:"lat"`
+		} `json:"location"`
+		Precise       int    `json:"precise"`
+		Confidence    int    `json:"confidence"`
+		Comprehension int    `json:"comprehension"`
+		Level         string `json:"level"`
+	} `json:"result"`
+}
+
+type GeocodeRequest struct {
+	Address string `json:"address"`
+}
+
+type GeocodeResponse struct {
+	Longitude float64 `json:"longitude"`
+	Latitude  float64 `json:"latitude"`
+}
+
+// Geocode address to coordinates
+func geocodeAddress(w http.ResponseWriter, r *http.Request) {
+	var req GeocodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Address == "" {
+		http.Error(w, "Address is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get Baidu Map AK from environment
+	baiduAK := os.Getenv("BAIDU_MAP_AK")
+	if baiduAK == "" {
+		http.Error(w, "Baidu Map AK not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Clean address: remove special characters that might affect geocoding
+	cleanedAddress := req.Address
+	// Remove common separators and special characters
+	replacer := strings.NewReplacer(
+		"-", "",
+		"_", "",
+		"|", "",
+		"/", "",
+		"\\", "",
+		"(", "",
+		")", "",
+		"[", "",
+		"]", "",
+	)
+	cleanedAddress = replacer.Replace(cleanedAddress)
+	cleanedAddress = strings.TrimSpace(cleanedAddress)
+
+	// Get location prefix from environment and prepend to address
+	locationPrefix := os.Getenv("LOCATION_PREFIX")
+	fullAddress := cleanedAddress
+	if locationPrefix != "" {
+		// Check if address already starts with the prefix
+		if !strings.HasPrefix(cleanedAddress, locationPrefix) {
+			fullAddress = locationPrefix + cleanedAddress
+		}
+	}
+
+	log.Printf("Geocoding - Original: %s, Cleaned: %s, Full: %s", req.Address, cleanedAddress, fullAddress)
+
+	// Call Baidu Geocoding API with proper URL encoding
+	apiURL := fmt.Sprintf("https://api.map.baidu.com/geocoding/v3/?address=%s&output=json&ak=%s",
+		url.QueryEscape(fullAddress),
+		baiduAK)
+
+	log.Printf("Geocoding request - Address: %s, URL: %s", fullAddress, apiURL)
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		log.Printf("Failed to call Baidu API: %v", err)
+		http.Error(w, "Failed to geocode address", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read response: %v", err)
+		http.Error(w, "Failed to read geocoding response", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Baidu API response: %s", string(body))
+
+	var baiduResp BaiduGeocodingResponse
+	if err := json.Unmarshal(body, &baiduResp); err != nil {
+		log.Printf("Failed to parse response: %v", err)
+		http.Error(w, "Failed to parse geocoding response", http.StatusInternalServerError)
+		return
+	}
+
+	if baiduResp.Status != 0 {
+		log.Printf("Baidu API error - Status: %d, Address: %s, Response: %s", baiduResp.Status, req.Address, string(body))
+		http.Error(w, fmt.Sprintf("地理编码失败：请检查地址格式是否正确（状态码: %d）", baiduResp.Status), http.StatusBadRequest)
+		return
+	}
+
+	// Round to 5 decimal places
+	lng := math.Round(baiduResp.Result.Location.Lng*100000) / 100000
+	lat := math.Round(baiduResp.Result.Location.Lat*100000) / 100000
+
+	response := GeocodeResponse{
+		Longitude: lng,
+		Latitude:  lat,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	// Initialize database
 	if err := initDB(); err != nil {
@@ -596,6 +720,7 @@ func main() {
 	api.HandleFunc("/annotations", createAnnotation).Methods("POST")
 	api.HandleFunc("/annotations/{id}", deleteAnnotation).Methods("DELETE")
 	api.HandleFunc("/upload", uploadImage).Methods("POST")
+	api.HandleFunc("/geocode", geocodeAddress).Methods("POST")
 
 	// Image serving route
 	r.HandleFunc("/images/{filename}", serveImage).Methods("GET")

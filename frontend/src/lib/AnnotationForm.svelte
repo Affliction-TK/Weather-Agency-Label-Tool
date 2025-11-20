@@ -111,6 +111,41 @@
     allowAutoStationSelection = event.target.value === '';
   }
 
+  let fetchingCoordinates = false;
+
+  async function fetchCoordinates() {
+    if (!formData.location || !formData.location.trim()) {
+      toasts.error('请先输入地点');
+      return;
+    }
+
+    fetchingCoordinates = true;
+    try {
+      const response = await fetch(`${API_BASE}/geocode`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ address: formData.location })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        formData.longitude = data.longitude.toString();
+        formData.latitude = data.latitude.toString();
+        toasts.success('经纬度获取成功！');
+      } else {
+        const errorText = await response.text();
+        toasts.error('获取经纬度失败：' + (errorText || '请检查地址是否正确'));
+      }
+    } catch (error) {
+      console.error('Failed to fetch coordinates:', error);
+      toasts.error('获取经纬度失败：' + error.message);
+    } finally {
+      fetchingCoordinates = false;
+    }
+  }
+
   async function handleSubmit() {
     saving = true;
     try {
@@ -263,6 +298,22 @@
           required 
         />
       </div>
+    </div>
+
+    <div class="geocode-action">
+      <button 
+        type="button" 
+        class="geocode-btn"
+        on:click={fetchCoordinates}
+        disabled={fetchingCoordinates || !formData.location}
+      >
+        {#if fetchingCoordinates}
+          获取中...
+        {:else}
+          📍 获取经纬度
+        {/if}
+      </button>
+      <span class="geocode-hint">根据地点自动获取经纬度坐标</span>
     </div>
 
     <div class="form-group">
@@ -486,5 +537,49 @@
     cursor: not-allowed;
     box-shadow: none;
     background: #ccc;
+  }
+
+  .geocode-action {
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .geocode-btn {
+    padding: 10px 24px;
+    background: #34c759;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 12px rgba(52, 199, 89, 0.25);
+    white-space: nowrap;
+  }
+
+  .geocode-btn:hover:not(:disabled) {
+    background: #2ea64a;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(52, 199, 89, 0.35);
+  }
+
+  .geocode-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .geocode-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+    background: #ccc;
+  }
+
+  .geocode-hint {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
   }
 </style>
