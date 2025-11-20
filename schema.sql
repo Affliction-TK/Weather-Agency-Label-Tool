@@ -19,7 +19,11 @@ CREATE TABLE IF NOT EXISTS images (
     filepath VARCHAR(512) NOT NULL,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     annotated BOOLEAN DEFAULT FALSE,
-    INDEX idx_annotated (annotated)
+    is_standard BOOLEAN DEFAULT NULL COMMENT 'NULL=未处理, TRUE=标准图片(有时间和地点), FALSE=非标准图片',
+    ocr_time VARCHAR(255) DEFAULT NULL COMMENT 'OCR识别的时间',
+    ocr_location VARCHAR(255) DEFAULT NULL COMMENT 'OCR识别的地点',
+    INDEX idx_annotated (annotated),
+    INDEX idx_is_standard (is_standard)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Annotations table

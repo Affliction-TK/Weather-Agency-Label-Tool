@@ -83,11 +83,14 @@ type Station struct {
 }
 
 type Image struct {
-	ID         int       `json:"id"`
-	Filename   string    `json:"filename"`
-	Filepath   string    `json:"filepath"`
-	UploadedAt time.Time `json:"uploaded_at"`
-	Annotated  bool      `json:"annotated"`
+	ID          int       `json:"id"`
+	Filename    string    `json:"filename"`
+	Filepath    string    `json:"filepath"`
+	UploadedAt  time.Time `json:"uploaded_at"`
+	Annotated   bool      `json:"annotated"`
+	IsStandard  *bool     `json:"is_standard,omitempty"`
+	OCRTime     string    `json:"ocr_time,omitempty"`
+	OCRLocation string    `json:"ocr_location,omitempty"`
 }
 
 type Annotation struct {
@@ -128,6 +131,14 @@ func initDB() error {
 
 	log.Println("Database connected successfully")
 	return nil
+}
+
+// nullString 将空字符串转换为NULL值
+func nullString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // Calculate distance between two points using Haversine formula
@@ -239,7 +250,8 @@ func getNearestStation(w http.ResponseWriter, r *http.Request) {
 
 func getImages(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
-		SELECT i.id, i.filename, i.filepath, i.uploaded_at, i.annotated
+		SELECT i.id, i.filename, i.filepath, i.uploaded_at, i.annotated,
+		       i.is_standard, i.ocr_time, i.ocr_location
 		FROM images i
 		ORDER BY i.annotated ASC, i.uploaded_at DESC
 	`)
@@ -252,8 +264,20 @@ func getImages(w http.ResponseWriter, r *http.Request) {
 	images := []Image{}
 	for rows.Next() {
 		var img Image
-		if err := rows.Scan(&img.ID, &img.Filename, &img.Filepath, &img.UploadedAt, &img.Annotated); err != nil {
+		var isStandard sql.NullBool
+		var ocrTime, ocrLocation sql.NullString
+		if err := rows.Scan(&img.ID, &img.Filename, &img.Filepath, &img.UploadedAt, &img.Annotated,
+			&isStandard, &ocrTime, &ocrLocation); err != nil {
 			continue
+		}
+		if isStandard.Valid {
+			img.IsStandard = &isStandard.Bool
+		}
+		if ocrTime.Valid {
+			img.OCRTime = ocrTime.String
+		}
+		if ocrLocation.Valid {
+			img.OCRLocation = ocrLocation.String
 		}
 		images = append(images, img)
 	}
@@ -267,15 +291,29 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 
 	var img Image
+	var isStandard sql.NullBool
+	var ocrTime, ocrLocation sql.NullString
 	err := db.QueryRow(`
-		SELECT id, filename, filepath, uploaded_at, annotated
+		SELECT id, filename, filepath, uploaded_at, annotated,
+		       is_standard, ocr_time, ocr_location
 		FROM images
 		WHERE id = ?
-	`, id).Scan(&img.ID, &img.Filename, &img.Filepath, &img.UploadedAt, &img.Annotated)
+	`, id).Scan(&img.ID, &img.Filename, &img.Filepath, &img.UploadedAt, &img.Annotated,
+		&isStandard, &ocrTime, &ocrLocation)
 
 	if err != nil {
 		http.Error(w, "Image not found", http.StatusNotFound)
 		return
+	}
+
+	if isStandard.Valid {
+		img.IsStandard = &isStandard.Bool
+	}
+	if ocrTime.Valid {
+		img.OCRTime = ocrTime.String
+	}
+	if ocrLocation.Valid {
+		img.OCRLocation = ocrLocation.String
 	}
 
 	// Get annotation if exists
@@ -487,8 +525,19 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save to database
-	result, err := db.Exec("INSERT INTO images (filename, filepath) VALUES (?, ?)", filename, filepath)
+	// 执行OCR识别
+	ocrResult, err := ProcessImageOCR(filepath)
+	if err != nil {
+		log.Printf("OCR processing failed for %s: %v", filename, err)
+		ocrResult = &OCRResult{IsStandard: false}
+	}
+
+	// Save to database with OCR results
+	result, err := db.Exec(`
+		INSERT INTO images (filename, filepath, is_standard, ocr_time, ocr_location)
+		VALUES (?, ?, ?, ?, ?)
+	`, filename, filepath, ocrResult.IsStandard,
+		nullString(ocrResult.Time), nullString(ocrResult.Location))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -497,11 +546,14 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 	id, _ := result.LastInsertId()
 
 	img := Image{
-		ID:         int(id),
-		Filename:   filename,
-		Filepath:   filepath,
-		UploadedAt: time.Now(),
-		Annotated:  false,
+		ID:          int(id),
+		Filename:    filename,
+		Filepath:    filepath,
+		UploadedAt:  time.Now(),
+		Annotated:   false,
+		IsStandard:  &ocrResult.IsStandard,
+		OCRTime:     ocrResult.Time,
+		OCRLocation: ocrResult.Location,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

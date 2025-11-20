@@ -46,11 +46,33 @@
       };
     } else {
       // Reset to defaults for new annotation
+      // 使用OCR识别的结果预填充表单（如果有的话）
+      let defaultTime = new Date().toISOString().slice(0, 16);
+      let defaultLocation = '';
+      
+      // 如果图片有OCR识别的时间，使用OCR时间
+      if (image.ocr_time) {
+        try {
+          // OCR时间格式是 "YYYY-MM-DD HH:MM:SS"，需要转换为表单需要的 "YYYY-MM-DDTHH:MM"
+          const ocrDate = new Date(image.ocr_time);
+          if (!isNaN(ocrDate.getTime())) {
+            defaultTime = ocrDate.toISOString().slice(0, 16);
+          }
+        } catch (e) {
+          console.log('Failed to parse OCR time:', e);
+        }
+      }
+      
+      // 如果图片有OCR识别的地点，使用OCR地点
+      if (image.ocr_location) {
+        defaultLocation = image.ocr_location;
+      }
+      
       formData = {
         category: '大雾',
         severity: '轻度',
-        observationTime: new Date().toISOString().slice(0, 16),
-        location: '',
+        observationTime: defaultTime,
+        location: defaultLocation,
         longitude: '',
         latitude: '',
         stationId: ''
