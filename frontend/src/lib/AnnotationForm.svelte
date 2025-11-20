@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import { toasts } from './toastStore.js';
+  import ConfirmModal from './ConfirmModal.svelte';
   
   export let image;
   export let annotation = null;
@@ -21,7 +22,10 @@
   };
 
   let saving = false;
+  let deleting = false;
+  let showDeleteConfirm = false;
   let suggestedStation = null;
+  let allowAutoStationSelection = true; // Keeps auto-selection active until user manually overrides
 
   // Reset form when image changes
   $: if (image) {
@@ -53,6 +57,7 @@
       };
     }
     suggestedStation = null;
+    allowAutoStationSelection = !formData.stationId; // Existing annotations keep their station unless user clears it
   }
 
   // Watch for coordinate changes to suggest nearest station
@@ -70,13 +75,18 @@
       const response = await fetch(`${API_BASE}/stations/nearest?longitude=${lon}&latitude=${lat}`);
       if (response.ok) {
         suggestedStation = await response.json();
-        if (!formData.stationId) {
+        if (allowAutoStationSelection) {
           formData.stationId = suggestedStation.id;
         }
       }
     } catch (error) {
       console.error('Failed to find nearest station:', error);
     }
+  }
+
+  function handleStationChange(event) {
+    formData.stationId = event.target.value;
+    allowAutoStationSelection = event.target.value === '';
   }
 
   async function handleSubmit() {
@@ -115,11 +125,50 @@
       saving = false;
     }
   }
+
+  function handleDelete() {
+    if (!annotation || deleting) {
+      return;
+    }
+    showDeleteConfirm = true;
+  }
+
+  function requestImageDelete() {
+    if (annotation || !image) {
+      return;
+    }
+    dispatch('requestImageDelete', image);
+  }
+
+  async function executeDelete() {
+    showDeleteConfirm = false;
+    deleting = true;
+    try {
+      const response = await fetch(`${API_BASE}/annotations/${annotation.id}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        toasts.success('标注已删除');
+        dispatch('deleted');
+      } else {
+        const errorText = await response.text();
+        toasts.error('删除失败：' + (errorText || '请重试'));
+      }
+    } catch (error) {
+      console.error('Failed to delete annotation:', error);
+      toasts.error('删除失败：' + error.message);
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <div class="annotation-form">
-  <div class="image-preview">
-    <img src="{IMAGE_BASE}/{image.filename}" alt={image.filename} />
+  <div class="image-container">
+    <div class="image-preview">
+      <img src="{IMAGE_BASE}/{image.filename}" alt={image.filename} />
+    </div>
     <div class="image-info">
       <strong>文件名：</strong>{image.filename}
     </div>
@@ -132,7 +181,7 @@
         <select id="category" bind:value={formData.category} required>
           <option value="大雾">大雾</option>
           <option value="结冰">结冰</option>
-          <option value="积劳">积劳</option>
+          <option value="积涝">积涝</option>
         </select>
       </div>
 
@@ -196,7 +245,7 @@
 
     <div class="form-group">
       <label for="station">监测点 *</label>
-      <select id="station" bind:value={formData.stationId} required>
+      <select id="station" bind:value={formData.stationId} on:change={handleStationChange} required>
         <option value="">请选择监测点</option>
         {#each stations as station (station.id)}
           <option value={station.id}>
@@ -212,7 +261,25 @@
     </div>
 
     <div class="form-actions">
-      <button type="submit" disabled={saving}>
+      {#if annotation}
+        <button type="button" class="danger-btn" on:click={handleDelete} disabled={saving || deleting}>
+          {#if deleting}
+            删除中...
+          {:else}
+            删除标注
+          {/if}
+        </button>
+      {:else}
+        <button 
+          type="button" 
+          class="danger-btn"
+          on:click={requestImageDelete}
+          disabled={saving}
+        >
+          删除图片
+        </button>
+      {/if}
+      <button type="submit" disabled={saving || deleting}>
         {#if saving}
           保存中...
         {:else}
@@ -223,48 +290,72 @@
   </form>
 </div>
 
+{#if showDeleteConfirm}
+  <ConfirmModal
+    title="删除确认"
+    message="确认删除该标注记录？此操作无法撤销。"
+    confirmText="删除"
+    type="danger"
+    on:confirm={executeDelete}
+    on:cancel={() => showDeleteConfirm = false}
+  />
+{/if}
+
 <style>
   .annotation-form {
     height: 100%;
     overflow-y: auto;
-    padding: 24px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 32px;
+    background: white;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .image-container {
+    margin-bottom: 32px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    overflow: hidden;
+    border: 1px solid #eee;
   }
 
   .image-preview {
-    margin-bottom: 24px;
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    background: white;
+    background: #f8f9fa;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 200px;
+    padding: 20px;
   }
 
   .image-preview img {
-    width: 100%;
-    max-height: 450px;
+    max-width: 100%;
+    max-height: 500px;
     object-fit: contain;
-    background: white;
+    display: block;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   }
 
   .image-info {
-    padding: 16px;
+    padding: 16px 20px;
     font-size: 14px;
-    color: #666;
-    font-weight: 500;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+    color: #333;
+    background: white;
+    border-top: 1px solid #eee;
+    font-family: monospace;
   }
 
   form {
-    background: white;
-    padding: 28px;
-    border-radius: 16px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    background: transparent;
+    padding: 0;
   }
 
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    gap: 24px;
   }
 
   .form-group {
@@ -273,61 +364,95 @@
 
   label {
     display: block;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     font-weight: 600;
-    color: #333;
-    font-size: 14px;
+    color: #555;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 
   input, select {
     width: 100%;
     padding: 12px 16px;
-    border: 2px solid #e0e0e0;
-    border-radius: 10px;
-    font-size: 14px;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    font-size: 15px;
     box-sizing: border-box;
-    transition: all 0.3s;
-    background: white;
+    transition: all 0.2s;
+    background: #fcfcfd;
+    color: #333;
+    appearance: none;
+  }
+
+  /* Custom select arrow */
+  select {
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007AFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px top 50%;
+    background-size: 10px auto;
+    padding-right: 40px;
   }
 
   input:focus, select:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    background: white;
+    border-color: #007aff;
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
   }
 
   .suggestion {
-    margin-top: 12px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    border-radius: 10px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(52, 199, 89, 0.1);
+    border-radius: 8px;
     font-size: 13px;
-    color: #667eea;
+    color: #2e7d32;
     font-weight: 500;
-    border-left: 4px solid #667eea;
+    display: flex;
+    align-items: center;
+  }
+  
+  .suggestion::before {
+    content: '📍';
+    margin-right: 6px;
   }
 
-  .form-actions {
-    margin-top: 32px;
-    text-align: right;
-  }
+    .form-actions {
+      margin-top: 40px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
 
   button {
-    padding: 14px 36px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 12px 32px;
+    background: #007aff;
     color: white;
     border: none;
-    border-radius: 12px;
-    font-size: 16px;
+    border-radius: 24px; /* Pill shape */
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    transition: all 0.2s;
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25);
+  }
+
+  .danger-btn {
+    background: #ff3b30;
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.25);
+  }
+
+  .danger-btn:hover:not(:disabled) {
+    background: #d70015;
+    box-shadow: 0 6px 16px rgba(255, 59, 48, 0.35);
   }
 
   button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    background: #0062cc;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 122, 255, 0.35);
   }
 
   button:active:not(:disabled) {
@@ -335,8 +460,9 @@
   }
 
   button:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
-    transform: none;
+    box-shadow: none;
+    background: #ccc;
   }
 </style>

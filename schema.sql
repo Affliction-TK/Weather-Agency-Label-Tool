@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS images (
 CREATE TABLE IF NOT EXISTS annotations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     image_id INT NOT NULL,
-    category ENUM('积劳', '大雾', '结冰') NOT NULL,
+    category ENUM('积涝', '大雾', '结冰') NOT NULL,
     severity ENUM('无', '轻度', '中度', '重度') NOT NULL,
     observation_time DATETIME NOT NULL,
     location VARCHAR(255) NOT NULL,

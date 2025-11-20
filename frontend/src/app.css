@@ -1,3 +1,26 @@
+:root {
+  --system-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --primary-color: #007AFF; /* Apple System Blue */
+  --primary-hover: #0062CC;
+  --bg-color: #F5F5F7; /* Apple Light Gray Background */
+  --sidebar-bg: rgba(245, 245, 247, 0.8);
+  --content-bg: #FFFFFF;
+  --text-primary: #1D1D1F;
+  --text-secondary: #86868B;
+  --border-color: #D2D2D7;
+  --divider-color: #E5E5EA;
+  --success-color: #34C759;
+  --warning-color: #FF9500;
+  --danger-color: #FF3B30;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 18px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -6,13 +29,26 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: var(--system-font);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  line-height: 1.5;
 }
 
 #app {
   width: 100%;
   height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
+button {
+  font-family: var(--system-font);
+}
+
+input, select, textarea {
+  font-family: var(--system-font);
 }
 

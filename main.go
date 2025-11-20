@@ -359,6 +359,95 @@ func createAnnotation(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(annotation)
 }
 
+func deleteAnnotation(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	annotationID, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid annotation ID", http.StatusBadRequest)
+		return
+	}
+
+	var imageID int
+	err = db.QueryRow("SELECT image_id FROM annotations WHERE id = ?", annotationID).Scan(&imageID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Annotation not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.Exec("DELETE FROM annotations WHERE id = ?", annotationID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE images SET annotated = FALSE WHERE id = ?", imageID); err != nil {
+		log.Printf("Error resetting image annotated status: %v", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func deleteImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	imageID, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid image ID", http.StatusBadRequest)
+		return
+	}
+
+	var filename, filepathStr string
+	var annotated bool
+	if err := db.QueryRow(`
+		SELECT filename, filepath, annotated
+		FROM images
+		WHERE id = ?
+	`, imageID).Scan(&filename, &filepathStr, &annotated); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Image not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if annotated {
+		http.Error(w, "Annotated images cannot be deleted", http.StatusBadRequest)
+		return
+	}
+
+	var annotationCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM annotations WHERE image_id = ?", imageID).Scan(&annotationCount); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if annotationCount > 0 {
+		http.Error(w, "Image has annotations and cannot be deleted", http.StatusConflict)
+		return
+	}
+
+	if err := os.Remove(filepathStr); err != nil {
+		if !os.IsNotExist(err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if _, err := db.Exec("DELETE FROM images WHERE id = ?", imageID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func uploadImage(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart form (max 32MB)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -451,7 +540,9 @@ func main() {
 	api.HandleFunc("/stations/nearest", getNearestStation).Methods("GET")
 	api.HandleFunc("/images", getImages).Methods("GET")
 	api.HandleFunc("/images/{id}", getImage).Methods("GET")
+	api.HandleFunc("/images/{id}", deleteImage).Methods("DELETE")
 	api.HandleFunc("/annotations", createAnnotation).Methods("POST")
+	api.HandleFunc("/annotations/{id}", deleteAnnotation).Methods("DELETE")
 	api.HandleFunc("/upload", uploadImage).Methods("POST")
 
 	// Image serving route

@@ -118,7 +118,7 @@ Open http://localhost:8080 in your browser.
 - Unannotated images are marked with orange badge
 - Click an image to annotate it
 - Fill in all required fields:
-  - **天气类型** (Weather Type): 大雾, 结冰, or 积劳
+  - **天气类型** (Weather Type): 大雾, 结冰, or 积涝
   - **严重等级** (Severity): 无, 轻度, 中度, or 重度
   - **观测时间** (Observation Time): Date and time
   - **地点** (Location): Location name

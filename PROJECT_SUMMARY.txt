@@ -10,7 +10,7 @@ REQUIREMENTS FULFILLMENT
 
 All requirements from the problem statement have been successfully implemented:
 
-✅ 1. Label categories: 积劳 (accumulated labor), 大雾 (heavy fog), 结冰 (icing)
+✅ 1. Label categories: 积涝 (accumulated labor), 大雾 (heavy fog), 结冰 (icing)
 ✅ 2. Severity levels: 无 (none), 轻度 (light), 中度 (moderate), 重度 (severe)
 ✅ 3. Time input field (datetime-local)
 ✅ 4. Location input field

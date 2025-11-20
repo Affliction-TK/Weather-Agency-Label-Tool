@@ -190,7 +190,7 @@ Save or update annotation for an image.
 
 **Field Descriptions:**
 - `image_id`: ID of the image being annotated (required, integer)
-- `category`: Weather phenomenon (required, enum: "大雾", "结冰", "积劳")
+- `category`: Weather phenomenon (required, enum: "大雾", "结冰", "积涝")
 - `severity`: Severity level (required, enum: "无", "轻度", "中度", "重度")
 - `observation_time`: Time of observation (required, ISO 8601 datetime string)
 - `location`: Location name (required, string)
@@ -324,7 +324,7 @@ GET /images/1700000000_fog_image.jpg
 {
   id: number
   image_id: number
-  category: "大雾" | "结冰" | "积劳"
+  category: "大雾" | "结冰" | "积涝"
   severity: "无" | "轻度" | "中度" | "重度"
   observation_time: string  // ISO 8601 datetime
   location: string

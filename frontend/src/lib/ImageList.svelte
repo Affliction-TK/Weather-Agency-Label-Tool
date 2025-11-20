@@ -1,7 +1,9 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   
+  /** @type {{id: number, filename: string, annotated: boolean}[]} */
   export let images = [];
+  /** @type {{id: number} | null} */
   export let currentImage = null;
 
   const dispatch = createEventDispatcher();
@@ -35,6 +37,13 @@
     }
   }
 
+  function handleKeyActivate(event, callback) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      callback();
+    }
+  }
+
   function toggleUnannotated() {
     showUnannotated = !showUnannotated;
     saveCollapseState();
@@ -57,20 +66,32 @@
 <div class="image-list">
   <!-- Unannotated section -->
   <div class="section">
-    <div class="section-header" on:click={toggleUnannotated}>
+    <div 
+      class="section-header" 
+      on:click={toggleUnannotated}
+      role="button"
+      tabindex="0"
+      on:keydown={(event) => handleKeyActivate(event, toggleUnannotated)}
+    >
       <span class="toggle-icon" class:collapsed={!showUnannotated}>▼</span>
       <h3>未标注 <span class="count">{unannotatedImages.length}</span></h3>
     </div>
     {#if showUnannotated}
       <div class="section-content">
         {#if unannotatedImages.length === 0}
-          <p class="empty-message">暂无未标注图片</p>
+          <div class="empty-message-container">
+            <span class="empty-icon">✨</span>
+            <p class="empty-message">暂无未标注图片</p>
+          </div>
         {:else}
           {#each unannotatedImages as image (image.id)}
             <div 
-              class="image-item"
+              class="image-item unannotated-item"
               class:active={currentImage && currentImage.id === image.id}
               on:click={() => selectImage(image)}
+              role="button"
+              tabindex="0"
+              on:keydown={(event) => handleKeyActivate(event, () => selectImage(image))}
             >
               <div class="thumbnail">
                 <img src="{IMAGE_BASE}/{image.filename}" alt={image.filename} />
@@ -90,20 +111,32 @@
 
   <!-- Annotated section -->
   <div class="section">
-    <div class="section-header" on:click={toggleAnnotated}>
+    <div 
+      class="section-header" 
+      on:click={toggleAnnotated}
+      role="button"
+      tabindex="0"
+      on:keydown={(event) => handleKeyActivate(event, toggleAnnotated)}
+    >
       <span class="toggle-icon" class:collapsed={!showAnnotated}>▼</span>
       <h3>已标注 <span class="count">{annotatedImages.length}</span></h3>
     </div>
     {#if showAnnotated}
       <div class="section-content">
         {#if annotatedImages.length === 0}
-          <p class="empty-message">暂无已标注图片</p>
+          <div class="empty-message-container">
+            <span class="empty-icon">📭</span>
+            <p class="empty-message">暂无已标注图片</p>
+          </div>
         {:else}
           {#each annotatedImages as image (image.id)}
             <div 
-              class="image-item"
+              class="image-item annotated-item"
               class:active={currentImage && currentImage.id === image.id}
               on:click={() => selectImage(image)}
+              role="button"
+              tabindex="0"
+              on:keydown={(event) => handleKeyActivate(event, () => selectImage(image))}
             >
               <div class="thumbnail">
                 <img src="{IMAGE_BASE}/{image.filename}" alt={image.filename} />
@@ -126,35 +159,34 @@
   .image-list {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
   }
 
   .section {
-    background: white;
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid #e0e0e0;
+    display: flex;
+    flex-direction: column;
   }
 
   .section-header {
     display: flex;
     align-items: center;
-    padding: 12px 15px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 8px 4px;
     cursor: pointer;
     user-select: none;
-    transition: background 0.2s;
+    color: var(--text-secondary);
+    transition: color 0.2s;
   }
 
   .section-header:hover {
-    background: linear-gradient(135deg, #5568d3 0%, #63408a 100%);
+    color: var(--text-primary);
   }
 
   .section-header h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     flex: 1;
     display: flex;
     align-items: center;
@@ -162,23 +194,15 @@
   }
 
   .count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    padding: 0 8px;
-    background: rgba(255, 255, 255, 0.25);
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 600;
+    color: var(--text-secondary);
+    font-weight: 400;
   }
 
   .toggle-icon {
-    margin-right: 8px;
-    font-size: 12px;
+    margin-right: 6px;
+    font-size: 10px;
     transition: transform 0.2s;
-    color: white;
+    opacity: 0.7;
   }
 
   .toggle-icon.collapsed {
@@ -188,47 +212,62 @@
   .section-content {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 10px;
+    gap: 4px;
+  }
+
+  .empty-message-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+    color: var(--text-secondary);
+    background: rgba(0,0,0,0.02);
+    border-radius: 8px;
+    margin: 4px 0;
+    border: 1px dashed rgba(0,0,0,0.05);
+  }
+
+  .empty-icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+    opacity: 0.6;
   }
 
   .empty-message {
     text-align: center;
-    color: #999;
-    padding: 20px;
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 500;
   }
 
   .image-item {
     display: flex;
-    background: white;
-    border: 2px solid transparent;
-    border-radius: 8px;
-    padding: 10px;
+    align-items: center;
+    padding: 8px;
+    border-radius: var(--radius-s);
     cursor: pointer;
     transition: all 0.2s;
+    background: transparent;
   }
 
   .image-item:hover {
-    border-color: #667eea;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
-    transform: translateY(-1px);
+    background: rgba(0, 0, 0, 0.04);
   }
 
   .image-item.active {
-    border-color: #667eea;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    background: var(--primary-color);
+    color: white;
+    box-shadow: var(--shadow-sm);
   }
 
   .thumbnail {
-    width: 80px;
-    height: 60px;
+    width: 48px;
+    height: 48px;
     flex-shrink: 0;
     overflow: hidden;
     border-radius: 6px;
-    background: #f0f0f0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    background: #E5E5EA;
+    border: 1px solid rgba(0,0,0,0.1);
   }
 
   .thumbnail img {
@@ -242,17 +281,22 @@
     margin-left: 12px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
     min-width: 0;
+    gap: 4px;
   }
 
   .filename {
-    font-size: 12px;
-    color: #333;
+    font-size: 13px;
+    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .image-item.active .filename {
+    color: white;
   }
 
   .status {
@@ -261,21 +305,46 @@
   }
 
   .badge {
-    padding: 3px 10px;
-    border-radius: 12px;
     font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
-  .badge.annotated {
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
+  .image-item.active .badge {
+    color: rgba(255, 255, 255, 0.8);
   }
 
-  .badge.unannotated {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    color: white;
+  /* Hide badges in list to keep it clean, or make them very subtle dots */
+  .badge {
+    display: none; 
   }
+  
+  /* Add a status dot instead */
+  .info::after {
+    content: '';
+    display: block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--warning-color); /* Default unannotated */
+    margin-top: 4px;
+  }
+
+  .image-item.active .info::after {
+    background-color: rgba(255, 255, 255, 0.8);
+  }
+
+  /* Status dots */
+  .unannotated-item .info::after {
+    background-color: var(--warning-color);
+  }
+
+  .annotated-item .info::after {
+    background-color: var(--success-color);
+  }
+
+  /* We need to target the parent to change the dot color based on section, 
+     but CSS doesn't support parent selectors easily based on children classes without :has.
+     However, we know which section we are in.
+  */
 </style>
