@@ -72,7 +72,7 @@ func getUploadDir() string {
 }
 
 func getStaticDir() string {
-	return getEnv("STATIC_DIR", "./frontend/dist")
+	return getEnv("STATIC_DIR", "../frontend/dist")
 }
 
 // Models

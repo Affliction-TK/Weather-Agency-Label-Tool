@@ -1,4 +1,4 @@
-.PHONY: help setup build run dev clean test docker-up docker-down
+.PHONY: help build frontend-build backend-build run dev-frontend dev-backend clean test init-db
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -6,51 +6,43 @@ help: ## Show this help message
 	@echo 'Available targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup: ## Run initial setup
-	@bash setup.sh
+FRONTEND_DIR=frontend
+BACKEND_DIR=backend
+BACKEND_BIN_DIR=$(BACKEND_DIR)/bin
+BACKEND_BIN=$(BACKEND_BIN_DIR)/server
 
-build: ## Build the application
-	@echo "Building frontend..."
-	@cd frontend && npm run build
-	@echo "Building backend..."
-	@go build -o server main.go
+build: frontend-build backend-build ## Build the frontend and backend artifacts
 	@echo "Build complete!"
 
-run: build ## Build and run the application
+frontend-build: ## Build the frontend bundle
+	@echo "Building frontend..."
+	@cd $(FRONTEND_DIR) && npm run build
+
+backend-build: ## Build the backend server binary
+	@echo "Building backend..."
+	@mkdir -p $(BACKEND_BIN_DIR)
+	@cd $(BACKEND_DIR) && go build -o bin/server .
+
+run: build ## Build everything and run the backend server
 	@echo "Starting server..."
-	@./server
+	@cd $(BACKEND_DIR) && ./bin/server
 
-dev-frontend: ## Run frontend in development mode
-	@cd frontend && npm run dev
+dev-frontend: ## Run the frontend in development mode
+	@cd $(FRONTEND_DIR) && npm run dev
 
-dev-backend: ## Run backend in development mode
-	@go run main.go
+dev-backend: ## Run the backend in development mode
+	@cd $(BACKEND_DIR) && go run .
 
-clean: ## Clean build artifacts
+clean: ## Remove build artifacts
 	@echo "Cleaning..."
-	@rm -f server
-	@rm -rf frontend/dist
+	@rm -rf $(BACKEND_BIN_DIR)
+	@rm -rf $(FRONTEND_DIR)/dist
 	@echo "Clean complete!"
 
-test: ## Run tests
-	@go test -v ./...
-
-docker-up: ## Start MySQL database using docker-compose
-	@docker-compose up -d
-	@echo "Waiting for MySQL to be ready..."
-	@sleep 10
-	@echo "MySQL is ready!"
-
-docker-down: ## Stop MySQL database
-	@docker-compose down
-
-docker-logs: ## View MySQL logs
-	@docker-compose logs -f mysql
+test: ## Run backend unit tests
+	@cd $(BACKEND_DIR) && go test -v ./...
 
 init-db: ## Initialize database with schema
 	@echo "Initializing database..."
-	@mysql -h 127.0.0.1 -u weather_user -pweather_password weather_label_db < schema.sql
+	@mysql -h 127.0.0.1 -u weather_user -pweather_password weather_label_db < $(BACKEND_DIR)/schema.sql
 	@echo "Database initialized!"
-
-all: setup docker-up build ## Complete setup and build
-	@echo "All tasks complete! Run 'make run' to start the server."
