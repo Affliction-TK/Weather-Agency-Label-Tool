@@ -7,51 +7,84 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
-	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
 
-// BaiduOCRClient 百度OCR客户端
-type BaiduOCRClient struct {
-	APIKey      string
-	SecretKey   string
-	AccessToken string
-	TokenExpiry time.Time
+const (
+	defaultQwenBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+	defaultQwenModel   = "qwen3-vl-plus"
+)
+
+const (
+	vlmSystemPrompt    = "你是一名结构化信息抽取助手，负责从气象监测照片中的水印或字幕里提取时间与地点。务必只输出严格符合要求的 JSON。"
+	vlmUserInstruction = `请阅读这张气象监测照片右上或右下角的文字水印，提取拍摄时间和测站地点。如果无法确定某个字段，请填空字符串并将 confidence 设置为 0。
+返回 JSON，字段说明：
+{
+  "time": "24小时制时间戳，格式为 YYYY-MM-DD HH:MM[:SS]，若无法确定则为空字符串",
+  "location": "地点中文名称，包含省市县或测站名称，无法确定则为空字符串",
+  "confidence": 小数，0-1 之间，表示整体提取置信度,
+  "notes": "可选，说明判断依据，若无可留空"
+}
+仅返回 JSON，不要添加其它文字。`
+)
+
+// QwenVLMClient 封装通义千问 VLM 的调用
+type QwenVLMClient struct {
+	APIKey         string
+	BaseURL        string
+	Model          string
+	EnableThinking bool
+	ThinkingBudget int
+	httpClient     *http.Client
 }
 
-// BaiduTokenResponse 百度token响应
-type BaiduTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
-	Error       string `json:"error,omitempty"`
-	ErrorDesc   string `json:"error_description,omitempty"`
+type qwenMessage struct {
+	Role    string        `json:"role"`
+	Content []qwenContent `json:"content"`
 }
 
-// BaiduOCRResponse 百度OCR响应
-type BaiduOCRResponse struct {
-	LogID          uint64         `json:"log_id"`
-	WordsResultNum int            `json:"words_result_num"`
-	WordsResult    []BaiduOCRWord `json:"words_result"`
-	ErrorCode      int            `json:"error_code,omitempty"`
-	ErrorMsg       string         `json:"error_msg,omitempty"`
+type qwenContent struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *qwenImageURL `json:"image_url,omitempty"`
 }
 
-// BaiduOCRWord OCR识别的单个文字块
-type BaiduOCRWord struct {
-	Words    string           `json:"words"`
-	Location BaiduOCRLocation `json:"location"`
+type qwenImageURL struct {
+	URL string `json:"url"`
 }
 
-// BaiduOCRLocation 文字位置信息
-type BaiduOCRLocation struct {
-	Left   int `json:"left"`
-	Top    int `json:"top"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
+type qwenChatRequest struct {
+	Model          string        `json:"model"`
+	Messages       []qwenMessage `json:"messages"`
+	EnableThinking *bool         `json:"enable_thinking,omitempty"`
+	ThinkingBudget int           `json:"thinking_budget,omitempty"`
+}
+
+type qwenChatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	} `json:"error,omitempty"`
+}
+
+// vlmStructuredResult 定义模型返回的结构化内容
+type vlmStructuredResult struct {
+	Time       string  `json:"time"`
+	Location   string  `json:"location"`
+	Confidence float64 `json:"confidence"`
+	Notes      string  `json:"notes,omitempty"`
 }
 
 // OCRResult OCR识别结果
@@ -61,224 +94,161 @@ type OCRResult struct {
 	IsStandard bool   // 是否为标准图片（同时有时间和地点）
 }
 
-// NewBaiduOCRClient 创建百度OCR客户端
-func NewBaiduOCRClient(apiKey, secretKey string) *BaiduOCRClient {
-	return &BaiduOCRClient{
-		APIKey:    apiKey,
-		SecretKey: secretKey,
+// NewQwenVLMClient 创建 VLM 客户端
+func NewQwenVLMClient(apiKey, baseURL, model string, enableThinking bool, thinkingBudget int) *QwenVLMClient {
+	client := &QwenVLMClient{
+		APIKey:         apiKey,
+		BaseURL:        baseURL,
+		Model:          model,
+		EnableThinking: enableThinking,
+		ThinkingBudget: thinkingBudget,
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
 	}
+
+	if client.BaseURL == "" {
+		client.BaseURL = defaultQwenBaseURL
+	}
+	if client.Model == "" {
+		client.Model = defaultQwenModel
+	}
+
+	return client
 }
 
-// GetAccessToken 获取访问令牌
-func (c *BaiduOCRClient) GetAccessToken() error {
-	// 如果token还有效，直接返回
-	if c.AccessToken != "" && time.Now().Before(c.TokenExpiry) {
-		return nil
-	}
-
-	tokenURL := fmt.Sprintf(
-		"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=%s&client_secret=%s",
-		c.APIKey, c.SecretKey,
-	)
-
-	resp, err := http.Get(tokenURL)
+// ExtractMetadata 调用 VLM 模型识别时间、地点
+func (c *QwenVLMClient) ExtractMetadata(imagePath string) (*vlmStructuredResult, error) {
+	dataURL, err := encodeImageToDataURL(imagePath)
 	if err != nil {
-		return fmt.Errorf("failed to get access token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var tokenResp BaiduTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return fmt.Errorf("failed to decode token response: %w", err)
-	}
-
-	if tokenResp.Error != "" {
-		return fmt.Errorf("token error: %s - %s", tokenResp.Error, tokenResp.ErrorDesc)
-	}
-
-	c.AccessToken = tokenResp.AccessToken
-	// 提前5分钟过期，确保安全
-	c.TokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn-300) * time.Second)
-
-	return nil
-}
-
-// RecognizeText 识别图片中的文字
-func (c *BaiduOCRClient) RecognizeText(imagePath string) (*BaiduOCRResponse, error) {
-	// 确保有有效的token
-	if err := c.GetAccessToken(); err != nil {
 		return nil, err
 	}
 
-	// 读取图片并转换为base64
-	imageData, err := os.ReadFile(imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read image: %w", err)
+	request := qwenChatRequest{
+		Model: c.Model,
+		Messages: []qwenMessage{
+			{
+				Role: "system",
+				Content: []qwenContent{{
+					Type: "text",
+					Text: vlmSystemPrompt,
+				}},
+			},
+			{
+				Role: "user",
+				Content: []qwenContent{
+					{Type: "text", Text: vlmUserInstruction},
+					{Type: "image_url", ImageURL: &qwenImageURL{URL: dataURL}},
+				},
+			},
+		},
 	}
 
-	base64Image := base64.StdEncoding.EncodeToString(imageData)
-
-	// URL encode
-	encodedImage := url.QueryEscape(base64Image)
-
-	// 构建请求
-	ocrURL := fmt.Sprintf(
-		"https://aip.baidubce.com/rest/2.0/ocr/v1/general?access_token=%s",
-		c.AccessToken,
-	)
-
-	data := fmt.Sprintf("image=%s", encodedImage)
-	req, err := http.NewRequest("POST", ocrURL, bytes.NewBufferString(data))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	if c.EnableThinking {
+		enable := true
+		request.EnableThinking = &enable
+		if c.ThinkingBudget > 0 {
+			request.ThinkingBudget = c.ThinkingBudget
+		}
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	// 发送请求
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	payload, err := json.Marshal(request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send OCR request: %w", err)
+		return nil, fmt.Errorf("failed to marshal VLM request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.BaseURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VLM request: %w", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.APIKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call VLM API: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("failed to read VLM response: %w", err)
 	}
 
-	var ocrResp BaiduOCRResponse
-	if err := json.Unmarshal(body, &ocrResp); err != nil {
-		return nil, fmt.Errorf("failed to decode OCR response: %w", err)
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("VLM API error: status %d, body %s", resp.StatusCode, string(body))
 	}
 
-	if ocrResp.ErrorCode != 0 {
-		return nil, fmt.Errorf("OCR error %d: %s", ocrResp.ErrorCode, ocrResp.ErrorMsg)
+	var chatResp qwenChatResponse
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		return nil, fmt.Errorf("failed to decode VLM response: %w", err)
 	}
 
-	return &ocrResp, nil
+	if chatResp.Error != nil {
+		return nil, fmt.Errorf("VLM API error: %s", chatResp.Error.Message)
+	}
+
+	if len(chatResp.Choices) == 0 {
+		return nil, fmt.Errorf("VLM API returned no choices")
+	}
+
+	rawContent := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+	if rawContent == "" {
+		return nil, fmt.Errorf("VLM API returned empty content")
+	}
+
+	return parseVLMJSON(rawContent)
 }
 
-// ExtractTimeAndLocation 从OCR结果中提取时间和地点
-func ExtractTimeAndLocation(ocrResp *BaiduOCRResponse) *OCRResult {
-	result := &OCRResult{}
-
-	if ocrResp == nil || len(ocrResp.WordsResult) == 0 {
-		return result
+func encodeImageToDataURL(imagePath string) (string, error) {
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image: %w", err)
 	}
 
-	// 更宽松的时间正则表达式，支持更多格式
-	timePatterns := []*regexp.Regexp{
-		// 标准格式：2024-01-15 14:30:45 或 2024/01/15 14:30:45
-		regexp.MustCompile(`\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日\s]*\d{1,2}:\d{2}:\d{2}`),
-		// 没有秒：2024-01-15 14:30
-		regexp.MustCompile(`\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日\s]*\d{1,2}:\d{2}`),
-		// 紧凑格式：20240115143045 或 20240115 143045
-		regexp.MustCompile(`\d{4}\d{2}\d{2}\s*\d{2}\d{2}\d{2}`),
-		// 更短的紧凑格式：20240115 1430
-		regexp.MustCompile(`\d{4}\d{2}\d{2}\s*\d{2}\d{2}`),
-		// 只包含日期和部分数字（宽松匹配）
-		regexp.MustCompile(`\d{4}[-/年]\d{1,2}[-/月]\d{1,2}`),
+	ext := strings.ToLower(filepath.Ext(imagePath))
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
 	}
 
-	// 地点关键词
-	locationKeywords := []string{"省", "市", "县", "区", "站", "路", "街", "镇", "乡", "村"}
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
+}
 
-	// 分离上部区域（右上角）和下部区域（右下角）的文字块
-	// 按照 top 位置排序，前30%为上部区域，后30%为下部区域
-	var topWords, bottomWords []BaiduOCRWord
-	if len(ocrResp.WordsResult) > 0 {
-		// 找出最大和最小的top值
-		minTop, maxTop := ocrResp.WordsResult[0].Location.Top, ocrResp.WordsResult[0].Location.Top
-		for _, word := range ocrResp.WordsResult {
-			if word.Location.Top < minTop {
-				minTop = word.Location.Top
-			}
-			if word.Location.Top > maxTop {
-				maxTop = word.Location.Top
-			}
-		}
-
-		// 计算阈值
-		heightRange := maxTop - minTop
-		upperThreshold := minTop + heightRange/3 // 上部1/3区域
-		lowerThreshold := maxTop - heightRange/3 // 下部1/3区域
-
-		for _, word := range ocrResp.WordsResult {
-			if word.Location.Top <= upperThreshold {
-				topWords = append(topWords, word)
-			} else if word.Location.Top >= lowerThreshold {
-				bottomWords = append(bottomWords, word)
-			}
-		}
+func parseVLMJSON(raw string) (*vlmStructuredResult, error) {
+	clean := sanitizeJSONBlock(raw)
+	if clean == "" {
+		return nil, fmt.Errorf("no JSON block found in VLM response")
 	}
 
-	// 优先在上部区域查找时间（右上角）
-	for _, word := range topWords {
-		text := strings.TrimSpace(word.Words)
-		for _, pattern := range timePatterns {
-			if match := pattern.FindString(text); match != "" {
-				result.Time = normalizeTime(match)
-				break
-			}
-		}
-		if result.Time != "" {
-			break
-		}
+	var result vlmStructuredResult
+	if err := json.Unmarshal([]byte(clean), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal VLM JSON: %w", err)
 	}
 
-	// 如果上部没找到，在所有文字块中查找时间
-	if result.Time == "" {
-		for _, word := range ocrResp.WordsResult {
-			text := strings.TrimSpace(word.Words)
-			for _, pattern := range timePatterns {
-				if match := pattern.FindString(text); match != "" {
-					result.Time = normalizeTime(match)
-					break
-				}
-			}
-			if result.Time != "" {
-				break
-			}
+	return &result, nil
+}
+
+func sanitizeJSONBlock(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```json")
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+		if idx := strings.LastIndex(trimmed, "```"); idx != -1 {
+			trimmed = trimmed[:idx]
 		}
+		trimmed = strings.TrimSpace(trimmed)
 	}
 
-	// 优先在下部区域查找地点（右下角）
-	for _, word := range bottomWords {
-		text := strings.TrimSpace(word.Words)
-		for _, keyword := range locationKeywords {
-			if strings.Contains(text, keyword) {
-				result.Location = cleanLocationText(text)
-				break
-			}
-		}
-		if result.Location != "" {
-			break
-		}
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		return trimmed[start : end+1]
 	}
 
-	// 如果下部没找到，在所有文字块中查找地点
-	if result.Location == "" {
-		for _, word := range ocrResp.WordsResult {
-			text := strings.TrimSpace(word.Words)
-			for _, keyword := range locationKeywords {
-				if strings.Contains(text, keyword) {
-					result.Location = cleanLocationText(text)
-					break
-				}
-			}
-			if result.Location != "" {
-				break
-			}
-		}
-	}
-
-	// 判断是否为标准图片
-	result.IsStandard = result.Time != "" && result.Location != ""
-
-	return result
+	return trimmed
 }
 
 // normalizeTime 标准化时间格式，转换为 YYYY-MM-DD HH:MM:SS 格式
@@ -415,29 +385,34 @@ func cleanLocationText(text string) string {
 
 // ProcessImageOCR 处理图片OCR（主入口函数）
 func ProcessImageOCR(imagePath string) (*OCRResult, error) {
-	// 获取OCR配置
-	apiKey := getEnv("BAIDU_OCR_API_KEY", "")
-	secretKey := getEnv("BAIDU_OCR_SECRET_KEY", "")
-
-	if apiKey == "" || secretKey == "" {
-		log.Println("Warning: Baidu OCR credentials not configured, skipping OCR processing")
+	apiKey := getEnv("QWEN_VLM_API_KEY", "")
+	if apiKey == "" {
+		log.Println("Warning: Qwen VLM API key not configured, skipping OCR processing")
 		return &OCRResult{IsStandard: false}, nil
 	}
 
-	// 创建OCR客户端
-	client := NewBaiduOCRClient(apiKey, secretKey)
+	baseURL := getEnv("QWEN_VLM_BASE_URL", defaultQwenBaseURL)
+	model := getEnv("QWEN_VLM_MODEL", defaultQwenModel)
+	enableThinking := strings.EqualFold(getEnv("QWEN_VLM_ENABLE_THINKING", ""), "true")
+	thinkingBudget := getEnvInt("QWEN_VLM_THINKING_BUDGET", 0)
 
-	// 调用OCR识别
-	ocrResp, err := client.RecognizeText(imagePath)
+	client := NewQwenVLMClient(apiKey, baseURL, model, enableThinking, thinkingBudget)
+	structured, err := client.ExtractMetadata(imagePath)
 	if err != nil {
-		return nil, fmt.Errorf("OCR recognition failed: %w", err)
+		return nil, fmt.Errorf("VLM extraction failed: %w", err)
 	}
 
-	// 提取时间和地点
-	result := ExtractTimeAndLocation(ocrResp)
+	result := &OCRResult{}
+	if strings.TrimSpace(structured.Time) != "" {
+		result.Time = normalizeTime(structured.Time)
+	}
+	if strings.TrimSpace(structured.Location) != "" {
+		result.Location = cleanLocationText(structured.Location)
+	}
+	result.IsStandard = result.Time != "" && result.Location != ""
 
-	log.Printf("OCR Result - Time: %s, Location: %s, IsStandard: %v",
-		result.Time, result.Location, result.IsStandard)
+	log.Printf("VLM Result - Time: %s, Location: %s, Confidence: %.2f, IsStandard: %v",
+		result.Time, result.Location, structured.Confidence, result.IsStandard)
 
 	return result, nil
 }

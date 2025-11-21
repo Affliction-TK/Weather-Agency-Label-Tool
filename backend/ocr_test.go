@@ -105,80 +105,40 @@ func TestCleanLocationText(t *testing.T) {
 	}
 }
 
-func TestExtractTimeAndLocation(t *testing.T) {
-	tests := []struct {
-		name         string
-		ocrResponse  *BaiduOCRResponse
-		expectedTime string
-		expectedLoc  string
-		expectedStd  bool
-	}{
-		{
-			name: "Standard image with time and location",
-			ocrResponse: &BaiduOCRResponse{
-				WordsResultNum: 2,
-				WordsResult: []BaiduOCRWord{
-					{Words: "2024-01-15 14:30:45"},
-					{Words: "北京市朝阳区监测站"},
-				},
-			},
-			expectedTime: "2024-01-15 14:30:45",
-			expectedLoc:  "北京市朝阳区监测站",
-			expectedStd:  true,
-		},
-		{
-			name: "Image with time only",
-			ocrResponse: &BaiduOCRResponse{
-				WordsResultNum: 1,
-				WordsResult: []BaiduOCRWord{
-					{Words: "2024-01-15 14:30:45"},
-				},
-			},
-			expectedTime: "2024-01-15 14:30:45",
-			expectedLoc:  "",
-			expectedStd:  false,
-		},
-		{
-			name: "Image with location only",
-			ocrResponse: &BaiduOCRResponse{
-				WordsResultNum: 1,
-				WordsResult: []BaiduOCRWord{
-					{Words: "北京市朝阳区监测站"},
-				},
-			},
-			expectedTime: "",
-			expectedLoc:  "北京市朝阳区监测站",
-			expectedStd:  false,
-		},
-		{
-			name: "Empty OCR response",
-			ocrResponse: &BaiduOCRResponse{
-				WordsResultNum: 0,
-				WordsResult:    []BaiduOCRWord{},
-			},
-			expectedTime: "",
-			expectedLoc:  "",
-			expectedStd:  false,
-		},
-	}
+func TestParseVLMJSON(t *testing.T) {
+	t.Run("valid json", func(t *testing.T) {
+		raw := `{"time":"2024-01-15 14:30","location":"北京市朝阳区","confidence":0.92}`
+		result, err := parseVLMJSON(raw)
+		if err != nil {
+			t.Fatalf("parseVLMJSON returned error: %v", err)
+		}
+		if result.Time != "2024-01-15 14:30" {
+			t.Errorf("unexpected time: %s", result.Time)
+		}
+		if result.Location != "北京市朝阳区" {
+			t.Errorf("unexpected location: %s", result.Location)
+		}
+		if result.Confidence != 0.92 {
+			t.Errorf("unexpected confidence: %f", result.Confidence)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ExtractTimeAndLocation(tt.ocrResponse)
+	t.Run("code fence json", func(t *testing.T) {
+		raw := "```json\n{\n  \"time\": \"2024/07/15 09:30\",\n  \"location\": \"上海市浦东新区\",\n  \"confidence\": 0.8\n}\n```"
+		result, err := parseVLMJSON(raw)
+		if err != nil {
+			t.Fatalf("parseVLMJSON returned error: %v", err)
+		}
+		if result.Location != "上海市浦东新区" {
+			t.Errorf("unexpected location: %s", result.Location)
+		}
+	})
 
-			if result.Time != tt.expectedTime {
-				t.Errorf("Time = %q, want %q", result.Time, tt.expectedTime)
-			}
-
-			if result.Location != tt.expectedLoc {
-				t.Errorf("Location = %q, want %q", result.Location, tt.expectedLoc)
-			}
-
-			if result.IsStandard != tt.expectedStd {
-				t.Errorf("IsStandard = %v, want %v", result.IsStandard, tt.expectedStd)
-			}
-		})
-	}
+	t.Run("invalid json", func(t *testing.T) {
+		if _, err := parseVLMJSON("not json"); err == nil {
+			t.Fatalf("expected error for invalid json")
+		}
+	})
 }
 
 func TestNullString(t *testing.T) {

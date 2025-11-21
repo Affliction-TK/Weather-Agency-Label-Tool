@@ -21,6 +21,37 @@
     stationId: ''
   };
 
+  function formatObservationTimestamp(isoString) {
+    try {
+      return new Date(isoString).toISOString().slice(0, 16);
+    } catch (e) {
+      console.warn('Failed to format annotation timestamp', e);
+      return new Date().toISOString().slice(0, 16);
+    }
+  }
+
+  function formatOcrTimestamp(ocrTime) {
+    if (!ocrTime || typeof ocrTime !== 'string') {
+      return null;
+    }
+
+    const [rawDate, rawTime] = ocrTime.trim().split(/\s+/);
+    if (!rawDate || !rawTime) {
+      return null;
+    }
+
+    const normalizedDate = rawDate.replace(/\//g, '-');
+    const timeParts = rawTime.split(':');
+    if (timeParts.length < 2) {
+      return null;
+    }
+
+    const hours = timeParts[0].padStart(2, '0');
+    const minutes = timeParts[1].padStart(2, '0');
+
+    return `${normalizedDate}T${hours}:${minutes}`;
+  }
+
   let saving = false;
   let deleting = false;
   let showDeleteConfirm = false;
@@ -38,7 +69,7 @@
       formData = {
         category: annotation.category || '大雾',
         severity: annotation.severity || '轻度',
-        observationTime: annotation.observation_time ? new Date(annotation.observation_time).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+        observationTime: annotation.observation_time ? formatObservationTimestamp(annotation.observation_time) : new Date().toISOString().slice(0, 16),
         location: annotation.location || '',
         longitude: annotation.longitude || '',
         latitude: annotation.latitude || '',
@@ -52,14 +83,11 @@
       
       // 如果图片有OCR识别的时间，使用OCR时间
       if (image.ocr_time) {
-        try {
-          // OCR时间格式是 "YYYY-MM-DD HH:MM:SS"，需要转换为表单需要的 "YYYY-MM-DDTHH:MM"
-          const ocrDate = new Date(image.ocr_time);
-          if (!isNaN(ocrDate.getTime())) {
-            defaultTime = ocrDate.toISOString().slice(0, 16);
-          }
-        } catch (e) {
-          console.log('Failed to parse OCR time:', e);
+        const formatted = formatOcrTimestamp(image.ocr_time);
+        if (formatted) {
+          defaultTime = formatted;
+        } else {
+          console.log('Failed to parse OCR time:', image.ocr_time);
         }
       }
       
